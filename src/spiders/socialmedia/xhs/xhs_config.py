@@ -7,7 +7,7 @@
 # ==================== 爬取配置 ====================
 CRAWLER_TYPE = "search"     # search
 START_PAGE = 1              # 起始页码
-MAX_NOTES_COUNT = 2000      # 最大笔记数
+MAX_NOTES_COUNT = 3      # 最大笔记数
 
 # ==================== 排序和类型 ====================
 SORT_TYPE = "general"       # general | popularity_descending | time_descending
