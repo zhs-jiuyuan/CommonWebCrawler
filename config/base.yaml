@@ -1,0 +1,66 @@
+scrapy:
+  bot_name: "commonspider"
+  spider_modules: ["src.spiders"]
+  newspider_module: "src.spiders"
+  robotstxt_obey: false
+
+concurrency:
+  concurrent_requests: 32
+  concurrent_requests_per_domain: 16
+  download_delay: 2
+  randomize_download_delay: 1
+
+timeout:
+  download_timeout: 30
+  retry_times: 3
+  retry_http_codes: [500, 502, 503, 504, 408, 429]
+
+middlewares:
+  downloader:
+    "scrapy.downloadermiddlewares.useragent.UserAgentMiddleware": null
+    "scrapy.downloadermiddlewares.retry.RetryMiddleware": null
+
+    # "scrapy.middlewares.xx.xx": xx
+
+pipelines:
+  item:
+    # "src.pipelines.xx.xx": xx
+
+redis:
+  # url: "${REDIS_URL:redis://localhost:6379}"
+
+proxy:
+  # api_url: "${PROXY_API_URL:http://localhost:5010/get}"
+  # enabled: "${PROXY_ENABLED:false}"
+
+output:
+  #
+
+postgresql:
+  #
+
+logging:
+  level: "${LOG_LEVEL:INFO}"
+  file: "${LOG_FILE:logs/scrapy.log}"
+
+monitoring:
+  telnetconsole_enabled: false
+
+request_fingerprinter_implementation: "2.7"
+
+autothrottle:
+  enabled: true
+  start_delay: 2
+  max_delay: 60
+  target_concurrency: 1.0
+  debug: false
+
+httpcache:
+  enabled: false
+  expiration_secs: 3600
+  dir: "httpcache"
+
+task:
+  id_format: "{spider_name}_{date}_{timestamp}"
+  batch_size: 1000
+
