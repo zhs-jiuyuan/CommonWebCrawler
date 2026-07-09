@@ -6,10 +6,15 @@ import json
 import os
 
 import scrapy
+from scrapy.exceptions import CloseSpider
 
 from src.spiders.base import BaseSpider
 from .xhs_sign import sign_with_xhshow, generate_x_b3_traceid, generate_xray_traceid
 from src.items.base import BaseItem
+
+_LOG_DIR = os.path.join(os.path.dirname(__file__), "logs")
+os.makedirs(_LOG_DIR, exist_ok=True)
+_LOG_FILE = os.path.join(_LOG_DIR, "scrapy.log")
 
 
 class XiaohongshuSpider(BaseSpider):
@@ -22,6 +27,7 @@ class XiaohongshuSpider(BaseSpider):
     ]
 
     custom_settings = {
+        "LOG_FILE": _LOG_FILE,
         "DOWNLOAD_DELAY": 2.0,
         "CONCURRENT_REQUESTS": 3,
         "CONCURRENT_REQUESTS_PER_DOMAIN": 3,
@@ -76,7 +82,7 @@ class XiaohongshuSpider(BaseSpider):
         if not cookies_dict.get("a1"):
             raise ValueError("Cookie file missing required 'a1' field")
 
-        self.logger.info(f"[XHS] 加载cookie, a1={cookies_dict['a1'][:12]}...")
+        self.logger.info(f"[XHS] 加载cookie, %d条, a1=%s...", len(cookies_dict), cookies_dict['a1'][:12])
         return cookies_dict, "; ".join(pairs)
 
     def _build_headers(self, api: str, data: dict = None, method: str = "POST") -> dict:
@@ -149,6 +155,7 @@ class XiaohongshuSpider(BaseSpider):
         }
         headers = self._build_headers(api, data)
         body = json.dumps(data, separators=(",", ":"), ensure_ascii=False)
+        self.logger.debug("[XHS] Requesting detail note_id=%s", note_id)
         return scrapy.Request(
             url=self.BASE_URL + api,
             method="POST", headers=headers, body=body,
@@ -162,25 +169,42 @@ class XiaohongshuSpider(BaseSpider):
         page = response.meta.get("page", 1)
         try:
             data = json.loads(response.text)
-        except Exception:
-            self.logger.error(f"[XHS] Failed to parse search JSON")
+        except Exception as e:
+            self.logger.error(
+                "[XHS] Failed to parse search JSON page=%d status=%d body_preview=%s error=%s",
+                page, response.status, response.text[:200], str(e),
+            )
             return
 
         if not data.get("success"):
-            self.logger.error(f"[XHS] Search API error: {data.get('msg')}")
+            self.logger.error(
+                "[XHS] Search API error page=%d msg=%s code=%s",
+                page, data.get("msg"), data.get("code"),
+            )
             return
 
         items = data.get("data", {}).get("items", [])
         has_more = data.get("data", {}).get("has_more", False)
         notes = [it for it in items if it.get("model_type") == "note"]
-        self.logger.info(f"[XHS] Search page {page}: {len(notes)} notes, has_more={has_more}")
+        self.logger.info(
+            "[XHS] Search page %d: total=%d notes=%d has_more=%s",
+            page, len(items), len(notes), has_more,
+        )
 
         for note in notes:
             if self.items_count >= self.num_limit:
+                self.logger.info(
+                    "[XHS] Reached num_limit=%d at page=%d, stop yielding",
+                    self.num_limit, page,
+                )
                 return
             note_id = note.get("id")
+            if not note_id:
+                self.logger.warning("[XHS] Note missing id, skip")
+                continue
             note_url = f"https://www.xiaohongshu.com/explore/{note_id}"
             if note_url in self._seen_urls:
+                self.logger.debug("[XHS] Duplicate note, skip note_id=%s", note_id)
                 continue
             self._seen_urls.add(note_url)
             yield self._make_note_detail_request(
@@ -196,25 +220,43 @@ class XiaohongshuSpider(BaseSpider):
         xsec_token = response.meta.get("xsec_token", "")
 
         if response.status == 461:
-            self.logger.warning(f"[XHS] 461 for note {note_id}, skip")
+            self.logger.warning(
+                "[XHS] 461 anti-bot for note_id=%s, closing spider", note_id,
+            )
+            raise CloseSpider("461 anti-bot detected")
+
+        if response.status != 200:
+            self.logger.warning(
+                "[XHS] Unexpected status=%d for note_id=%s, skip", response.status, note_id,
+            )
             return
 
         try:
             data = json.loads(response.text)
-        except Exception:
-            self.logger.error(f"[XHS] Failed to parse note detail JSON for {note_id}")
+        except Exception as e:
+            self.logger.error(
+                "[XHS] Failed to parse detail JSON note_id=%s status=%d error=%s body_preview=%s",
+                note_id, response.status, str(e), response.text[:200],
+            )
             return
 
         if not data.get("success"):
-            self.logger.error(f"[XHS] Note detail API error: {data.get('msg')}")
+            self.logger.error(
+                "[XHS] Note detail API error note_id=%s msg=%s code=%s",
+                note_id, data.get("msg"), data.get("code"),
+            )
             return
 
         items = data.get("data", {}).get("items", [])
         if not items:
-            self.logger.warning(f"[XHS] No data for note: {note_id}")
+            self.logger.warning("[XHS] No note_card data for note_id=%s", note_id)
             return
 
         note_card = items[0].get("note_card", {})
+        if not note_card:
+            self.logger.warning("[XHS] Empty note_card for note_id=%s", note_id)
+            return
+
         note_info = self._extract_note_info(note_card, note_id)
         note_info["xsec_token"] = xsec_token
         note_info["url"] = f"https://www.xiaohongshu.com/explore/{note_id}"
@@ -222,7 +264,14 @@ class XiaohongshuSpider(BaseSpider):
 
         self.items_count += 1
         self.logger.info(
-            f"[XHS] Note {self.items_count}/{self.num_limit}: {note_info.get('title', '')[:40]}"
+            "[XHS] Note %d/%d | id=%s title=%s author=%s type=%s images=%d video=%s",
+            self.items_count, self.num_limit,
+            note_id,
+            note_info.get("title", "")[:30],
+            note_info.get("author", ""),
+            note_info.get("type", ""),
+            len(note_info.get("images", [])),
+            "yes" if note_info.get("video") else "no",
         )
 
         yield self.create_item(note_info, url=note_info["url"])

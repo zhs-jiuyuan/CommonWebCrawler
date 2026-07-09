@@ -1,13 +1,17 @@
 """
 Scrapy download handler using curl_cffi for TLS fingerprint impersonation.
 """
+import logging
 import random
+import time as time_module
 
 from curl_cffi import requests as curl_requests
 from scrapy import signals
 from scrapy.http import HtmlResponse
 from scrapy.settings import Settings
 from twisted.internet import threads
+
+logger = logging.getLogger(__name__)
 
 _BROWSER_ALIASES = [
     "chrome120",
@@ -69,7 +73,27 @@ class CurlCffiDownloadHandler:
         if proxy:
             req_kwargs["proxies"] = {"http": proxy, "https": proxy}
 
-        resp = self.session.request(**req_kwargs)
+        start = time_module.time()
+        logger.debug(
+            "[CurlCffi] download start | url=%s method=%s alias=%s",
+            url, method, alias,
+        )
+
+        try:
+            resp = self.session.request(**req_kwargs)
+        except Exception as e:
+            elapsed = time_module.time() - start
+            logger.error(
+                "[CurlCffi] download failed | url=%s method=%s error=%s elapsed=%.2fs",
+                url, method, str(e), elapsed,
+            )
+            raise
+
+        elapsed = time_module.time() - start
+        logger.info(
+            "[CurlCffi] download done | url=%s status=%s size=%db elapsed=%.2fs alias=%s",
+            url, resp.status_code, len(resp.content), elapsed, alias,
+        )
 
         raw_headers = {}
         skip_keys = {"content-encoding", "content-length", "transfer-encoding"}

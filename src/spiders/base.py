@@ -14,6 +14,11 @@ class BaseSpider(scrapy.Spider):
         self.date = getattr(self, "date", datetime.now().strftime("%Y-%m-%d"))
         self.task_id = getattr(self, "task_id", f"{self.name}_{self.date}_{int(time.time())}")
 
+        self.logger.info(
+            "[BaseSpider] started | spider=%s task_id=%s mode=%s date=%s",
+            self.name, self.task_id, self.mode, self.date,
+        )
+
     def create_item(self, **kwargs) -> BaseItem:
         item = BaseItem()
 
@@ -34,10 +39,23 @@ class BaseSpider(scrapy.Spider):
         try:
             item.validate()
         except Exception as e:
-            # TODO: 后续增加 log 打印异常信息
+            self.logger.error(
+                "[BaseSpider] item validation failed | spider=%s url=%s error=%s",
+                self.name, item.get("url", "?"), str(e),
+            )
             raise
 
         return item
-    
+
     def closed(self, reason):
         stats = self.crawler.stats
+        self.logger.info(
+            "[BaseSpider] closed | spider=%s reason=%s "
+            "items_scraped=%s request_count=%s response_count=%s "
+            "finish_time=%s",
+            self.name, reason,
+            stats.get_value("item_scraped_count", 0),
+            stats.get_value("downloader/request_count", 0),
+            stats.get_value("downloader/response_count", 0),
+            stats.get_value("finish_time"),
+        )

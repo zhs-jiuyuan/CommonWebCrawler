@@ -1,6 +1,9 @@
+import logging
 import scrapy
 from datetime import datetime
 from itemadapter import ItemAdapter
+
+logger = logging.getLogger(__name__)
 
 
 class BaseItem(scrapy.Item):
@@ -21,8 +24,17 @@ class BaseItem(scrapy.Item):
         adapter = ItemAdapter(self)
 
         required_fields = ["url", "spider_name"]
+        missing = []
         for field in required_fields:
             if not adapter.get(field):
-                raise ValueError(f"Required field '{field}' is missing.")
+                missing.append(field)
+
+        if missing:
+            item_repr = {k: self.get(k) for k in list(self.keys())[:10]}
+            logger.warning(
+                "[BaseItem] validation failed | missing=%s item=%s",
+                missing, item_repr,
+            )
+            raise ValueError(f"Required field(s) missing: {', '.join(missing)}")
 
         return True
