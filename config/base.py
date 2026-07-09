@@ -90,10 +90,6 @@ SECTION_MAP = {
         "id_format": "TASK_ID_FORMAT",
         "batch_size": "BATCH_SIZE",
     },
-    "output": {
-        "dir": "OUTPUT_DIR",
-        "format": "OUTPUT_FORMAT",
-    },
     "postgres": {
         "url": "POSTGRES_URL",
     },
@@ -123,8 +119,6 @@ DEFAULTS = {
     "HTTPCACHE_DIR": "httpcache",
     "TASK_ID_FORMAT": "{spider_name}_{date}_{timestamp}",
     "BATCH_SIZE": 1000,
-    "OUTPUT_DIR": "/tmp/scrapy_output",
-    "OUTPUT_FORMAT": "jsonlines",
     "POSTGRES_URL": "postgresql://localhost/commonspider",
 }
 
@@ -135,47 +129,52 @@ def yaml_to_scrapy_settings(config):
     for section_name, field_map in SECTION_MAP.items():
         if section_name in config:
             section = config[section_name]
+            if section is None:
+                continue
             for yaml_key, scrapy_key in field_map.items():
                 settings[scrapy_key] = section.get(yaml_key, DEFAULTS.get(scrapy_key))
 
     if "middlewares" in config:
         middlewares = config["middlewares"]
-        if "downloader" in middlewares:
+        if middlewares is not None and "downloader" in middlewares:
             settings["DOWNLOAD_MIDDLEWARES"] = middlewares["downloader"]
 
     if "pipelines" in config:
         pipelines = config["pipelines"]
-        if "item" in pipelines:
+        if pipelines is not None and "item" in pipelines:
             settings["ITEM_PIPELINES"] = pipelines["item"]
 
     if "redis" in config:
         redis_config = config["redis"]
-        settings["REDIS_URL"] = redis_config.get("url", "redis://localhost:6379")
+        if redis_config is not None:
+            settings["REDIS_URL"] = redis_config.get("url", "redis://localhost:6379")
 
-        if redis_config.get("dupefilter_class"):
-            settings["DUPEFILTER_CLASS"] = redis_config.get("dupefilter_class")
-        if redis_config.get("scheduler"):
-            settings["SCHEDULER"] = redis_config.get("scheduler")
-            settings["SCHEDULER_PERSIST"] = redis_config.get("scheduler_persist", True)
+            if redis_config.get("dupefilter_class"):
+                settings["DUPEFILTER_CLASS"] = redis_config.get("dupefilter_class")
+            if redis_config.get("scheduler"):
+                settings["SCHEDULER"] = redis_config.get("scheduler")
+                settings["SCHEDULER_PERSIST"] = redis_config.get("scheduler_persist", True)
 
-            if "bloom_params" in redis_config:
-                bloom_params = redis_config["bloom_params"]
-                settings["REDIS_BLOOM_PARAMS"] = {
-                        "redis_url": settings["REDIS_URL"],
-                        "hash_number": bloom_params.get("hash_number", 6),
-                        "bit": bloom_params.get("bit", 30),
-                        }
+                if "bloom_params" in redis_config:
+                    bloom_params = redis_config["bloom_params"]
+                    settings["REDIS_BLOOM_PARAMS"] = {
+                            "redis_url": settings["REDIS_URL"],
+                            "hash_number": bloom_params.get("hash_number", 6),
+                            "bit": bloom_params.get("bit", 30),
+                            }
 
     if "proxy" in config:
         proxy_config = config["proxy"]
-        settings["PROXY_API_URL"] = proxy_config.get("api_url", "http://localhost:5010/get")
-        settings["PROXY_ENABLED"] = str(proxy_config.get("enabled", True)).lower() == "true"
+        if proxy_config is not None:
+            settings["PROXY_API_URL"] = proxy_config.get("api_url", "http://localhost:5010/get")
+            settings["PROXY_ENABLED"] = str(proxy_config.get("enabled", True)).lower() == "true"
 
     if "monitoring" in config:
         monitoring = config["monitoring"]
-        if monitoring.get("stats_class"):
-            settings["STATS_CLASS"] = monitoring.get("stats_class")
-        settings["TELNETCONSOLE_ENABLED"] = monitoring.get("telnetconsole_enabled", False)
+        if monitoring is not None:
+            if monitoring.get("stats_class"):
+                settings["STATS_CLASS"] = monitoring.get("stats_class")
+            settings["TELNETCONSOLE_ENABLED"] = monitoring.get("telnetconsole_enabled", False)
 
     settings["REQUEST_FINGERPRINTER_IMPLEMENTATION"] = config.get("request_fingerprinter_implementation", "2.7")
 

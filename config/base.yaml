@@ -24,20 +24,17 @@ middlewares:
 
 pipelines:
   item:
-    # "src.pipelines.xx.xx": xx
+    "src.pipelines.console_pipeline.ConsolePipeline": 100
 
 redis:
-  # url: "${REDIS_URL:redis://localhost:6379}"
+  url: "${REDIS_URL:redis://localhost:6379}"
 
 proxy:
   # api_url: "${PROXY_API_URL:http://localhost:5010/get}"
   # enabled: "${PROXY_ENABLED:false}"
 
-output:
-  #
-
-postgresql:
-  #
+postgres:
+  url: "${POSTGRES_URL:postgresql://localhost/commonspider}"
 
 logging:
   level: "${LOG_LEVEL:INFO}"
