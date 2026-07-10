@@ -241,7 +241,8 @@ class XiaohongshuSpider(SocialMediaSpider):
             self.logger.warning("[XHS] Empty note_card for note_id=%s", note_id)
             return
 
-        note_info = self._extract_note_info(note_card, note_id)
+        note_info = note_card
+        note_info["note_id"] = note_id
         note_info["xsec_token"] = xsec_token
         note_info["url"] = f"https://www.xiaohongshu.com/explore/{note_id}"
         note_info["search_keyword"] = self.keyword
@@ -252,62 +253,13 @@ class XiaohongshuSpider(SocialMediaSpider):
             self.items_count, self.num_limit,
             note_id,
             note_info.get("title", "")[:30],
-            note_info.get("author", ""),
+            note_info.get("user", {}).get("nickname", ""),
             note_info.get("type", ""),
-            len(note_info.get("images", [])),
+            len(note_info.get("image_list", [])),
             "yes" if note_info.get("video") else "no",
         )
 
         yield self.create_item(note_info, url=note_info["url"])
-
-    def _extract_note_info(self, note_card: dict, note_id: str) -> dict:
-        info = {
-            "note_id": note_id,
-            "title": note_card.get("title", ""),
-            "content": note_card.get("desc", ""),
-            "type": note_card.get("type", ""),
-            "published_at": note_card.get("time", 0),
-            "last_update_time": note_card.get("last_update_time", 0),
-        }
-        interact_info = note_card.get("interact_info", {})
-        info["liked_count"] = interact_info.get("liked_count", "0")
-        info["collected_count"] = interact_info.get("collected_count", "0")
-        info["comment_count"] = interact_info.get("comment_count", "0")
-        info["share_count"] = interact_info.get("share_count", "0")
-        user = note_card.get("user", {})
-        info["user_id"] = user.get("user_id", "")
-        info["author"] = user.get("nickname", "")
-        info["avatar"] = user.get("avatar", "")
-        image_list = note_card.get("image_list", [])
-        info["images"] = []
-        for img in image_list:
-            img_info = {
-                "url": img.get("url_default", "") or img.get("url", ""),
-                "width": img.get("width", 0),
-                "height": img.get("height", 0),
-            }
-            for img_detail in img.get("info_list", []):
-                if img_detail.get("image_scene") == "WB_DFT":
-                    img_info["url_no_watermark"] = img_detail.get("url", "")
-                    break
-            info["images"].append(img_info)
-        video = note_card.get("video", {})
-        if video:
-            media = video.get("media", {})
-            stream = media.get("stream", {})
-            video_url = ""
-            for quality in ["h266", "h265", "h264", "av1"]:
-                streams = stream.get(quality, [])
-                if streams:
-                    video_url = streams[0].get("master_url", "")
-                    break
-            info["video"] = {"url": video_url, "duration": video.get("duration", 0)}
-        tag_list = note_card.get("tag_list", [])
-        info["tags"] = [tag.get("name", "") for tag in tag_list if tag.get("name")]
-        topics = note_card.get("topics", [])
-        info["topics"] = [topic.get("name", "") for topic in topics if topic.get("name")]
-        info["ip_location"] = note_card.get("ip_location", "")
-        return info
 
     def create_item(self, data: dict, url: str) -> BaseItem:
         item = BaseItem()

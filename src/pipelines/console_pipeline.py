@@ -18,13 +18,8 @@ class ConsolePipeline:
         data.setdefault("_pipeline_ts", datetime.now().isoformat())
 
         spider.logger.info(
-            "[ConsolePipeline] item #%d | spider=%s url=%s",
+            "[ConsolePipeline] item #%d\n%s",
             self.item_count,
-            data.get("spider_name", "?"),
-            data.get("url", "?"),
-        )
-        spider.logger.debug(
-            "[ConsolePipeline] item data:\n%s",
             json.dumps(data, ensure_ascii=False, indent=2, default=str),
         )
         return item
