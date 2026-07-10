@@ -4,14 +4,15 @@
 """
 import json
 import os
+from datetime import datetime, timezone
 
 import scrapy
 from scrapy.exceptions import CloseSpider
 
 from src.spiders.socialmedia import SocialMediaSpider
+from src.deduplication.redis_helper import RedisDedupHelper
 from .xhs_sign import sign_with_xhshow, generate_x_b3_traceid, generate_xray_traceid
 from . import xhs_config as config
-from src.items.base import BaseItem
 
 _LOG_DIR = os.path.join(os.path.dirname(__file__), "logs")
 os.makedirs(_LOG_DIR, exist_ok=True)
@@ -30,6 +31,9 @@ class XiaohongshuSpider(SocialMediaSpider):
         "DOWNLOAD_HANDLERS": {
             "https": "src.middlewares.curl_cffi_handler.CurlCffiDownloadHandler",
         },
+        "ITEM_PIPELINES": {
+            "src.pipelines.postgres_pipeline.PostgresPipeline": 100,
+        },
     }
 
     BASE_URL = "https://edith.xiaohongshu.com"
@@ -37,14 +41,19 @@ class XiaohongshuSpider(SocialMediaSpider):
     def __init__(self, keyword: str = None, num: int = None, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-        self.keyword = keyword or config.KEYWORD
+        if keyword:
+            self.keywords = [keyword]
+        elif isinstance(config.KEYWORD, list):
+            self.keywords = config.KEYWORD
+        else:
+            self.keywords = [config.KEYWORD]
+
         self.num_limit = int(num) if num is not None else config.MAX_NOTES_COUNT
-        self.items_count = 0
-        self._seen_urls = set()
-
         self.cookies_dict, self.cookies_str = self._load_cookie()
+        self.helper = RedisDedupHelper(config.REDIS_URL, self.name)
+        self._scheduled = {}          # per-keyword scheduled count to avoid overscheduling
 
-        self.logger.info(f"[XHS] keyword={self.keyword}, num={self.num_limit}")
+        self.logger.info("[XHS] keywords=%s num=%d", self.keywords, self.num_limit)
 
     def _load_cookie(self):
         cookie_path = os.path.join(os.path.dirname(__file__), "xhs_cookies.json")
@@ -66,7 +75,7 @@ class XiaohongshuSpider(SocialMediaSpider):
         if not cookies_dict.get("a1"):
             raise ValueError("Cookie file missing required 'a1' field")
 
-        self.logger.info(f"[XHS] 加载cookie, %d条, a1=%s...", len(cookies_dict), cookies_dict['a1'][:12])
+        self.logger.info(f"[XHS] cookie loaded, %d pairs, a1=%s...", len(cookies_dict), cookies_dict['a1'][:12])
         return cookies_dict, "; ".join(pairs)
 
     def _build_headers(self, api: str, data: dict = None, method: str = "POST") -> dict:
@@ -95,12 +104,24 @@ class XiaohongshuSpider(SocialMediaSpider):
         }
 
     async def start(self):
-        yield self._make_search_request(page=config.START_PAGE)
+        for keyword in self.keywords:
+            if self.helper.is_keyword_done(keyword):
+                self.logger.info("[XHS] keyword=%s already done, skip", keyword)
+                continue
+            self.helper.register_keyword(keyword, self.num_limit)
+            collected = self.helper.get_collected(keyword)
+            if collected >= self.num_limit:
+                self.helper.mark_keyword_done(keyword)
+                self.logger.info("[XHS] keyword=%s already reached target, skip", keyword)
+                continue
+            self.logger.info("[XHS] keyword=%s collected=%d/%d, start crawling",
+                             keyword, collected, self.num_limit)
+            yield self._make_search_request(keyword, page=config.START_PAGE)
 
-    def _make_search_request(self, page: int = 1):
+    def _make_search_request(self, keyword: str, page: int = 1):
         api = "/api/sns/web/v1/search/notes"
         data = {
-            "keyword": self.keyword,
+            "keyword": keyword,
             "page": page,
             "page_size": 20,
             "search_id": generate_x_b3_traceid(21),
@@ -118,17 +139,18 @@ class XiaohongshuSpider(SocialMediaSpider):
         }
         headers = self._build_headers(api, data)
         body = json.dumps(data, separators=(",", ":"), ensure_ascii=False)
-        self.logger.info(f"[XHS] Search page {page}: keyword={self.keyword}")
+        self.logger.info("[XHS] search page=%d keyword=%s", page, keyword)
         return scrapy.Request(
             url=self.BASE_URL + api,
             method="POST", headers=headers, body=body,
             cookies=self.cookies_dict,
             callback=self.parse_search_results,
-            meta={"page": page},
+            meta={"page": page, "keyword": keyword},
             dont_filter=True,
         )
 
-    def _make_note_detail_request(self, note_id: str, xsec_token: str, xsec_source: str = "pc_search"):
+    def _make_note_detail_request(self, note_id: str, xsec_token: str, keyword: str = "",
+                                   xsec_source: str = "pc_search"):
         api = "/api/sns/web/v1/feed"
         data = {
             "source_note_id": note_id,
@@ -139,30 +161,32 @@ class XiaohongshuSpider(SocialMediaSpider):
         }
         headers = self._build_headers(api, data)
         body = json.dumps(data, separators=(",", ":"), ensure_ascii=False)
-        self.logger.debug("[XHS] Requesting detail note_id=%s", note_id)
+        self.logger.debug("[XHS] requesting detail note_id=%s", note_id)
         return scrapy.Request(
             url=self.BASE_URL + api,
             method="POST", headers=headers, body=body,
             cookies=self.cookies_dict,
             callback=self.parse_note_detail,
-            meta={"note_id": note_id, "xsec_token": xsec_token, "xsec_source": xsec_source},
+            meta={"note_id": note_id, "xsec_token": xsec_token, "xsec_source": xsec_source,
+                  "keyword": keyword},
             dont_filter=True,
         )
 
     def parse_search_results(self, response):
         page = response.meta.get("page", 1)
+        keyword = response.meta["keyword"]
         try:
             data = json.loads(response.text)
         except Exception as e:
             self.logger.error(
-                "[XHS] Failed to parse search JSON page=%d status=%d body_preview=%s error=%s",
+                "[XHS] failed to parse search JSON page=%d status=%d body_preview=%s error=%s",
                 page, response.status, response.text[:200], str(e),
             )
             return
 
         if not data.get("success"):
             self.logger.error(
-                "[XHS] Search API error page=%d msg=%s code=%s",
+                "[XHS] search API error page=%d msg=%s code=%s",
                 page, data.get("msg"), data.get("code"),
             )
             return
@@ -171,33 +195,38 @@ class XiaohongshuSpider(SocialMediaSpider):
         has_more = data.get("data", {}).get("has_more", False)
         notes = [it for it in items if it.get("model_type") == "note"]
         self.logger.info(
-            "[XHS] Search page %d: total=%d notes=%d has_more=%s",
-            page, len(items), len(notes), has_more,
+            "[XHS] page=%d total=%d notes=%d has_more=%s kw=%s",
+            page, len(items), len(notes), has_more, keyword,
         )
 
         for note in notes:
-            if len(self._seen_urls) >= self.num_limit:
+            scheduled = self._scheduled.get(keyword, 0)
+            if scheduled >= self.num_limit:
                 self.logger.info(
-                    "[XHS] Reached num_limit=%d at page=%d, stop yielding",
-                    self.num_limit, page,
+                    "[XHS] num_limit=%d reached, kw=%s, stop yielding",
+                    self.num_limit, keyword,
                 )
                 return
+
             note_id = note.get("id")
             if not note_id:
-                self.logger.warning("[XHS] Note missing id, skip")
+                self.logger.warning("[XHS] note missing id, skip")
                 continue
+
             note_url = f"https://www.xiaohongshu.com/explore/{note_id}"
-            if note_url in self._seen_urls:
-                self.logger.debug("[XHS] Duplicate note, skip note_id=%s", note_id)
+            if self.helper.is_note_seen(note_url, "search"):
+                self.logger.info("[XHS] dup skip | note_id=%s url=%s", note_id, note_url)
                 continue
-            self._seen_urls.add(note_url)
+
+            self._scheduled[keyword] = scheduled + 1
             yield self._make_note_detail_request(
                 note_id=note_id,
                 xsec_token=note.get("xsec_token", ""),
+                keyword=keyword,
             )
 
-        if has_more and len(self._seen_urls) < self.num_limit:
-            yield self._make_search_request(page=page + 1)
+        if has_more and self._scheduled.get(keyword, 0) < self.num_limit:
+            yield self._make_search_request(keyword, page=page + 1)
 
     def parse_note_detail(self, response):
         note_id = response.meta["note_id"]
@@ -211,7 +240,7 @@ class XiaohongshuSpider(SocialMediaSpider):
 
         if response.status != 200:
             self.logger.warning(
-                "[XHS] Unexpected status=%d for note_id=%s, skip", response.status, note_id,
+                "[XHS] unexpected status=%d for note_id=%s, skip", response.status, note_id,
             )
             return
 
@@ -219,38 +248,42 @@ class XiaohongshuSpider(SocialMediaSpider):
             data = json.loads(response.text)
         except Exception as e:
             self.logger.error(
-                "[XHS] Failed to parse detail JSON note_id=%s status=%d error=%s body_preview=%s",
+                "[XHS] failed to parse detail JSON note_id=%s status=%d error=%s body_preview=%s",
                 note_id, response.status, str(e), response.text[:200],
             )
             return
 
         if not data.get("success"):
             self.logger.error(
-                "[XHS] Note detail API error note_id=%s msg=%s code=%s",
+                "[XHS] note detail API error note_id=%s msg=%s code=%s",
                 note_id, data.get("msg"), data.get("code"),
             )
             return
 
         items = data.get("data", {}).get("items", [])
         if not items:
-            self.logger.warning("[XHS] No note_card data for note_id=%s", note_id)
+            self.logger.warning("[XHS] no note_card data for note_id=%s", note_id)
             return
 
         note_card = items[0].get("note_card", {})
         if not note_card:
-            self.logger.warning("[XHS] Empty note_card for note_id=%s", note_id)
+            self.logger.warning("[XHS] empty note_card for note_id=%s", note_id)
             return
+
+        note_url = f"https://www.xiaohongshu.com/explore/{note_id}"
+
+        self.helper.mark_note_collected(note_url, "search")
+        new_cnt = self.helper.incr(self._active_keyword(response))
 
         note_info = note_card
         note_info["note_id"] = note_id
         note_info["xsec_token"] = xsec_token
-        note_info["url"] = f"https://www.xiaohongshu.com/explore/{note_id}"
-        note_info["search_keyword"] = self.keyword
+        note_info["url"] = note_url
+        note_info["search_keyword"] = self._active_keyword(response)
 
-        self.items_count += 1
         self.logger.info(
-            "[XHS] Note %d/%d | id=%s title=%s author=%s type=%s images=%d video=%s",
-            self.items_count, self.num_limit,
+            "[XHS] note %d/%d | id=%s title=%s author=%s type=%s images=%d video=%s",
+            new_cnt, self.num_limit,
             note_id,
             note_info.get("title", "")[:30],
             note_info.get("user", {}).get("nickname", ""),
@@ -259,13 +292,53 @@ class XiaohongshuSpider(SocialMediaSpider):
             "yes" if note_info.get("video") else "no",
         )
 
-        yield self.create_item(note_info, url=note_info["url"])
+        user = note_card.get("user", {})
+        interact = note_card.get("interact_info", {})
+        pub_ms = note_card.get("time")
+        published_at = None
+        if pub_ms and isinstance(pub_ms, (int, float)):
+            published_at = datetime.fromtimestamp(pub_ms / 1000, tz=timezone.utc)
 
-    def create_item(self, data: dict, url: str) -> BaseItem:
-        item = BaseItem()
-        item['spider_name'] = self.name
-        item['target_type'] = self.target_type
-        item['task_id'] = self.task_id
-        item['url'] = url
-        item['data'] = data
-        return item
+        kw = self._active_keyword(response)
+        if new_cnt >= self.num_limit:
+            self.helper.mark_keyword_done(kw)
+            self.logger.info("[XHS] kw=%s done, collected=%d", kw, new_cnt)
+
+        yield self.create_item(
+            platform=self.name,
+            data_type="search",
+            item_id=note_id,
+            task_id=self.task_id,
+            title=note_card.get("title"),
+            content=note_card.get("desc"),
+            author=user.get("nickname"),
+            author_id=user.get("user_id"),
+            url=note_url,
+            published_at=published_at.isoformat() if published_at else None,
+            like_count=_parse_count(interact.get("liked_count", 0)),
+            comment_count=_parse_count(interact.get("comment_count", 0)),
+            share_count=_parse_count(interact.get("share_count", 0)),
+            crawl_time=datetime.now(timezone.utc).isoformat(),
+            raw_data=note_info,
+        )
+
+    def _active_keyword(self, response) -> str:
+        return response.meta.get("keyword", "")
+
+
+def _parse_count(value) -> int:
+    """'1万' / '1.3万' / '999' -> int"""
+    if isinstance(value, (int, float)):
+        return int(value)
+    if isinstance(value, str):
+        value = value.strip().replace(",", "")
+        if value.endswith("万"):
+            try:
+                return int(float(value[:-1]) * 10000)
+            except ValueError:
+                return 0
+        try:
+            return int(float(value))
+        except ValueError:
+            return 0
+    return 0
