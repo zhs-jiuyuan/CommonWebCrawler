@@ -50,10 +50,15 @@ class XiaohongshuSpider(SocialMediaSpider):
 
         self.num_limit = int(num) if num is not None else config.MAX_NOTES_COUNT
         self.cookies_dict, self.cookies_str = self._load_cookie()
-        self.helper = RedisDedupHelper(config.REDIS_URL, self.name)
-        self._scheduled = {}          # per-keyword scheduled count to avoid overscheduling
+        self._scheduled = {}
 
         self.logger.info("[XHS] keywords=%s num=%d", self.keywords, self.num_limit)
+
+    @classmethod
+    def from_crawler(cls, crawler, *args, **kwargs):
+        spider = super().from_crawler(crawler, *args, **kwargs)
+        spider.helper = RedisDedupHelper(crawler.settings.get("REDIS_URL"), spider.name)
+        return spider
 
     def _load_cookie(self):
         cookie_path = os.path.join(os.path.dirname(__file__), "xhs_cookies.json")
@@ -114,11 +119,12 @@ class XiaohongshuSpider(SocialMediaSpider):
                 self.helper.mark_keyword_done(keyword)
                 self.logger.info("[XHS] keyword=%s already reached target, skip", keyword)
                 continue
-            self.logger.info("[XHS] keyword=%s collected=%d/%d, start crawling",
-                             keyword, collected, self.num_limit)
-            yield self._make_search_request(keyword, page=config.START_PAGE)
+            remaining = self.num_limit - collected
+            self.logger.info("[XHS] keyword=%s collected=%d remaining=%d, start crawling",
+                             keyword, collected, remaining)
+            yield self._make_search_request(keyword, page=config.START_PAGE, remaining=remaining)
 
-    def _make_search_request(self, keyword: str, page: int = 1):
+    def _make_search_request(self, keyword: str, page: int = 1, remaining: int = 0):
         api = "/api/sns/web/v1/search/notes"
         data = {
             "keyword": keyword,
@@ -145,7 +151,7 @@ class XiaohongshuSpider(SocialMediaSpider):
             method="POST", headers=headers, body=body,
             cookies=self.cookies_dict,
             callback=self.parse_search_results,
-            meta={"page": page, "keyword": keyword},
+            meta={"page": page, "keyword": keyword, "remaining": remaining},
             dont_filter=True,
         )
 
@@ -175,6 +181,7 @@ class XiaohongshuSpider(SocialMediaSpider):
     def parse_search_results(self, response):
         page = response.meta.get("page", 1)
         keyword = response.meta["keyword"]
+        remaining = response.meta.get("remaining", self.num_limit)
         try:
             data = json.loads(response.text)
         except Exception as e:
@@ -201,10 +208,10 @@ class XiaohongshuSpider(SocialMediaSpider):
 
         for note in notes:
             scheduled = self._scheduled.get(keyword, 0)
-            if scheduled >= self.num_limit:
+            if scheduled >= remaining:
                 self.logger.info(
-                    "[XHS] num_limit=%d reached, kw=%s, stop yielding",
-                    self.num_limit, keyword,
+                    "[XHS] remaining=%d reached, kw=%s, stop yielding",
+                    remaining, keyword,
                 )
                 return
 
@@ -225,7 +232,8 @@ class XiaohongshuSpider(SocialMediaSpider):
                 keyword=keyword,
             )
 
-        if has_more and self._scheduled.get(keyword, 0) < self.num_limit:
+        if has_more and self._scheduled.get(keyword, 0) < remaining:
+            yield self._make_search_request(keyword, page=page + 1, remaining=remaining)
             yield self._make_search_request(keyword, page=page + 1)
 
     def parse_note_detail(self, response):

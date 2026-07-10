@@ -3,7 +3,6 @@
 
 所有爬取参数集中在此文件管理，爬虫通过 `from . import xhs_config as config` 引用。
 """
-import os
 
 # ==================== 爬取配置 ====================
 CRAWLER_TYPE = "search"         # search
@@ -17,6 +16,3 @@ NOTE_TYPE = 0                   # 0=不限 1=视频 2=图文
 
 # ==================== Cookie ====================
 COOKIE_FILE = "xhs_cookies.json"
-
-# ==================== Redis ====================
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
