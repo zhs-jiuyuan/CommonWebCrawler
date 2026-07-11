@@ -1,4 +1,7 @@
 scrapy
-itemadapter
-pyyaml
+curl_cffi
 python-dotenv
+psycopg2-binary
+redis
+xhshow
+pyyaml
