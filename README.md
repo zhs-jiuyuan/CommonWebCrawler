@@ -44,7 +44,14 @@ NOTE_TYPE = 0                   # 0=不限 1=视频 2=图文
 ### 启动
 
 ```bash
+# 全量采集（默认）
 scrapy crawl xiaohongshu
+
+# 增量采集（每轮每个关键词采 incre_num 条新笔记）
+scrapy crawl xiaohongshu -a mode=incremental -a incre_num=5
+
+# 指定关键词 + 数量
+scrapy crawl xiaohongshu -a keyword=美食 -a num=10
 ```
 
 ## 项目结构
@@ -90,10 +97,30 @@ XHSWebCrawler/
 ### Redis Key 结构
 
 ```
-{xiaohongshu}:notes              SET    "url|search"            全局去重
-{xiaohongshu}:kw:{keyword}       HASH   {target, done}          关键词状态
-{xiaohongshu}:kw:{keyword}:cnt   STRING                          已采集计数
+                        ┌─── 共享去重 ───┐
+{xiaohongshu}:notes              SET    "url|search"            全局去重，全量/增量共用
+
+{xiaohongshu}:kw:{keyword}       HASH   {target, done}          全量关键词状态
+{xiaohongshu}:kw:{keyword}:cnt   STRING                          全量已采集计数
+
+{xiaohongshu}:incr:kw:{keyword}  HASH   {target, done}          增量关键词状态
+{xiaohongshu}:incr:kw:{keyword}:cnt STRING                       增量已采集计数
 ```
+
+### 增量采集
+
+增量模式以**轮**为推进单位，每轮每个关键词各采集 `incre_num` 条新笔记，必须全部 keyword 完成才推进到下一轮。
+
+- **新关键词守卫**：增量启动时检测未跑过全量的新 keyword，warning + CloseSpider 退出
+- **共享去重**：全量和增量共用 `{xhs}:notes` SET，天然互不重复
+- **断点续爬**：中断后重跑自动补缺 undone 的 keyword，不动 target
+- **轮级门控**：全部 keyword done=1 → `advance_round` → target += incre_num → 下一轮
+
+```bash
+scrapy crawl xiaohongshu -a mode=incremental -a incre_num=5
+```
+
+详见 `src/spiders/socialmedia/xhs/incremental-design.md`。
 
 ### 数据库表
 

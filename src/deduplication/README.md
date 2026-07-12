@@ -10,9 +10,13 @@
 
 | Key | 类型 | 示例值 | 说明 |
 |-----|------|--------|------|
-| `{spider}:notes` | SET | `url\|search`、`url\|detail` | 全局去重集合，成员为 `"{url}|{data_type}"` |
-| `{spider}:kw:{keyword}` | HASH | `{target: 6, done: 1}` | 单个关键词的配置与完成状态 |
-| `{spider}:kw:{keyword}:cnt` | STRING | `6` | 该关键词已采集条数计数器 |
+| `{spider}:notes` | SET | `url\|search` | **全局去重集合**，全量/增量共用 |
+| `{spider}:kw:{keyword}` | HASH | `{target: 20, done: 1}` | 全量关键词进度 |
+| `{spider}:kw:{keyword}:cnt` | STRING | `20` | 全量已采集计数 |
+| `{spider}:incr:kw:{keyword}` | HASH | `{target: 15, done: 0}` | 增量关键词进度 |
+| `{spider}:incr:kw:{keyword}:cnt` | STRING | `15` | 增量已采集计数 |
+
+**mode 路由**：`__init__` 传入 `mode`（`"full"` 默认 / `"incremental"`），`_kw_key` / `_cnt_key` 自动选择 prefix，`_notes_key` 始终返回同一个 key。
 
 ### 示例（spider name = xiaohongshu）
 
@@ -33,17 +37,24 @@ xiaohongshu:kw:美食  →  {"target": "3", "done": "1"}
 ```python
 from src.deduplication.redis_helper import RedisDedupHelper
 
+# 全量模式（默认）
 helper = RedisDedupHelper(redis_url="redis://:pwd@localhost:6379/0", spider_name="xiaohongshu")
+
+# 增量模式
+helper = RedisDedupHelper(redis_url="redis://:pwd@localhost:6379/0", spider_name="xiaohongshu", mode="incremental")
 ```
 
 ### 关键词管理
 
 | 方法 | 参数 | 返回值 | 说明 |
 |------|------|--------|------|
-| `register_keyword(keyword, target)` | keyword: str, target: int | None | 注册关键词并设置目标条数，同时将 `done` 重置为 `"0"` |
+| `register_keyword(keyword, target)` | keyword: str, target: int | None | 注册关键词并设置 target，`done` 重置为 `"0"` |
 | `is_keyword_done(keyword)` | keyword: str | bool | 该关键词是否已完成 |
 | `mark_keyword_done(keyword)` | keyword: str | None | 标记关键词完成 |
-| `get_collected(keyword)` | keyword: str | int | 该关键词已采集条数（不存在时返回 0） |
+| `get_collected(keyword)` | keyword: str | int | 已采集条数（不存在时返回 0） |
+| `get_target(keyword)` | keyword: str | int | 当前轮的目标采集数（不存在时返回 0） |
+| `advance_round(keyword, incre)` | keyword: str, incre: int | None | 推进下一轮：target += incre, done=0 |
+| `keyword_has_full_record(keyword)` | keyword: str | bool | 检查全量模式下是否有该关键词的采集记录 |
 
 ### 笔记去重
 
@@ -134,6 +145,25 @@ helper_other = RedisDedupHelper(REDIS_URL, "weibo")
 │
 └─ spider 正常结束
 ```
+
+## 增量采集流程 — `_incr_start()`
+
+```
+启动 spider（mode=incremental）
+│
+├─ keyword_has_full_record(kw) == False ──→ warning + CloseSpider（新 keyword 必须先跑全量）
+│
+├─ all incr kw keys 不存在 ──→ register_keyword(kw, incre_num) 开第 1 轮
+├─ 全部 done=1 ──→ advance_round(kw, incre_num) 推进下一轮
+└─ 混合（部分 done=1 部分 done=0）──→ 不动 target，补缺 undone 的 keyword
+│
+for k in keywords:
+    ├─ is_keyword_done(k) == True ──→ skip（等其他人）
+    ├─ collected >= target ──→ mark_keyword_done + skip
+    └─ remaining = target - collected → yield search_request
+```
+
+**轮级门控**：必须全部 keyword done=1 才能推进到下一轮。中断后重跑只补缺，不累加 target。
 
 ## 警告：`is_keyword_done` 与 `register_keyword` 调用顺序
 
