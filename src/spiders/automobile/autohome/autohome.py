@@ -57,12 +57,12 @@ class AutohomeSpider(BaseSpider):
     def parse_entry(self, response):
         self.logger.info("[Autohome] response status=%d", response.status)
         try:
-            data = json.loads(response.text)
-            body = json.dumps(data, indent=2, ensure_ascii=False)
-        except json.JSONDecodeError:
-            body = response.text
+            cartype = json.loads(response.text)
+            print(cartype)
+        except json.JSONDecodeError as e:
+            self.logger.error("[Autohome] JSON decode error: %s", e)
+            return
 
-        self.logger.info("[Autohome] response body:\n%s", body)
         self.logger.info(
             "[Autohome] entry response parsed | status=%d length=%d",
             response.status, len(response.text),
