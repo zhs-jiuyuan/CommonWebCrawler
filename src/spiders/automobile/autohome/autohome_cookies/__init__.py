@@ -19,3 +19,11 @@ def _locate_button(page):
         if loc.count() > 0:
             return loc.first
     raise RuntimeError("找不到'找车'按钮")
+
+
+def _click_find_car(page, context, timeout):
+    btn = _locate_button(page)
+    with context.expect_page(timeout=timeout) as event_info:
+        btn.click()
+    new_page = event_info.value
+    new_page.wait_for_load_state('networkidle')
