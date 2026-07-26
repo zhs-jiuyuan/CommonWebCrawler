@@ -3,7 +3,18 @@ from unittest.mock import MagicMock
 
 sys.path.insert(0, "src/spiders/automobile/autohome")
 
-from autohome_cookies import _locate_button, _click_find_car
+from autohome_cookies import _locate_button, _click_find_car, _block_unnecessary
+
+
+class TestBlockUnnecessary:
+    def test_registers_route_interceptor(self):
+        mock_page = MagicMock()
+
+        _block_unnecessary(mock_page)
+
+        mock_page.route.assert_called_once()
+        args = mock_page.route.call_args
+        assert args[0][0] == "**/*"  # glob pattern
 
 
 class TestLocateButton:

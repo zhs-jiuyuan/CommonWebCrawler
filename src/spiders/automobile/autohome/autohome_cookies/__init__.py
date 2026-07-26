@@ -7,6 +7,20 @@ _DEFAULT_TIMEOUT = 30_000
 
 _FIND_CAR_XPATH = '//*[@id="app"]/div[1]/div[2]/section[2]/div[1]/div[2]/div/div[1]/a'
 
+_BLOCK_RESOURCE_TYPES = {"image", "font", "media"}
+
+
+def _block_unnecessary(page):
+    block_types = _BLOCK_RESOURCE_TYPES
+
+    def handle(route):
+        if route.request.resource_type in block_types:
+            route.abort()
+        else:
+            route.continue_()
+
+    page.route("**/*", handle)
+
 
 def _locate_button(page):
     strategies = [
@@ -40,6 +54,8 @@ def get_cookies(
     try:
         context = browser.new_context()
         page = context.new_page()
+
+        _block_unnecessary(page)
 
         page.goto(url)
         page.wait_for_load_state('networkidle')
