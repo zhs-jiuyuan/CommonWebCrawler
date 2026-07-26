@@ -228,6 +228,9 @@ __marimo__/
 Thumbs.db
 *~
 
+# Design docs (not for version control)
+docs/
+
 # Scrapy runtime
 logs/
 httpcache/
