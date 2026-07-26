@@ -27,3 +27,29 @@ def _click_find_car(page, context, timeout):
         btn.click()
     new_page = event_info.value
     new_page.wait_for_load_state('networkidle')
+
+
+def get_cookies(
+    url: Optional[str] = None,
+    timeout: Optional[int] = None,
+) -> dict[str, str]:
+    url = url or _DEFAULT_URL
+    timeout = timeout or _DEFAULT_TIMEOUT
+
+    browser = launch(headless=False)
+    try:
+        context = browser.new_context()
+        page = context.new_page()
+
+        page.goto(url)
+        page.wait_for_load_state('networkidle')
+
+        _click_find_car(page, context, timeout)
+
+        cookies = context.cookies()
+        return {c["name"]: c["value"] for c in cookies}
+    finally:
+        browser.close()
+
+
+__all__ = ["get_cookies"]
