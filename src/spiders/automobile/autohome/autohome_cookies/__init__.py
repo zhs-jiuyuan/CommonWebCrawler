@@ -7,7 +7,7 @@ _DEFAULT_TIMEOUT = 30_000
 
 _FIND_CAR_XPATH = '//*[@id="app"]/div[1]/div[2]/section[2]/div[1]/div[2]/div/div[1]/a'
 
-_BLOCK_RESOURCE_TYPES = {"image", "font", "media"}
+_BLOCK_RESOURCE_TYPES = {"image", "ping", "media", "font"}
 
 
 def _block_unnecessary(page):
@@ -16,8 +16,8 @@ def _block_unnecessary(page):
     def handle(route):
         if route.request.resource_type in block_types:
             route.abort()
-        else:
-            route.continue_()
+            return
+        route.continue_()
 
     page.route("**/*", handle)
 
