@@ -50,7 +50,7 @@ def get_cookies(
     url = url or _DEFAULT_URL
     timeout = timeout or _DEFAULT_TIMEOUT
 
-    browser = launch(headless=False)
+    browser = launch()
     try:
         context = browser.new_context()
         page = context.new_page()
