@@ -7,6 +7,7 @@ import os
 import scrapy
 
 from src.spiders.base import BaseSpider
+from .autohome_cookies import get_cookies
 
 _LOG_DIR = os.path.join(os.path.dirname(__file__), "logs")
 os.makedirs(_LOG_DIR, exist_ok=True)
@@ -29,13 +30,20 @@ class AutohomeSpider(BaseSpider):
         },
     }
 
-    BASE_URL = "https://car.app.autohome.com.cn"
+    BASE_URL = "https://www.autohome.com.cn"
 
-    async def start(self):
-        url = f"{self.BASE_URL}/carMiddle/getBrandInfoAll?appId=pc&needhmzx=1"
-        headers = {
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.logger.info("[Autohome] fetching cookies...")
+        self.cookies = get_cookies()
+        self.logger.info("[Autohome] cookies fetched, %d pairs", len(self.cookies))
+
+    def _build_headers(self, api: str, method: str = "GET", ref: str = BASE_URL) -> dict:
+        return {
             "accept": "*/*",
             "accept-language": "zh-CN,zh;q=0.9",
+            "cache-control": "no-cache",
+            "pragma": "no-cache",
             "priority": "u=1, i",
             "sec-ch-ua": "\"Not;A=Brand\";v=\"8\", \"Chromium\";v=\"150\", \"Google Chrome\";v=\"150\"",
             "sec-ch-ua-mobile": "?0",
@@ -43,8 +51,13 @@ class AutohomeSpider(BaseSpider):
             "sec-fetch-dest": "empty",
             "sec-fetch-mode": "cors",
             "sec-fetch-site": "same-site",
-            "Referer": "https://www.autohome.com.cn/",
+            "Referer": ref,
         }
+
+    async def start(self):
+        url = f"{self.BASE_URL}/web-main/car/web/price/treeMenu?extendseries=1"
+        headers = self._build_headers(api=url, method="GET", ref="https://www.autohome.com.cn/price/brandid_33")
+        headers["cookies"] = self.cookies
         self.logger.info("[Autohome] request entry URL: %s", url)
         yield scrapy.Request(
             url=url,
