@@ -70,13 +70,18 @@ class AutohomeSpider(BaseSpider):
     def parse_entry(self, response):
         self.logger.info("[Autohome] response status=%d", response.status)
         try:
-            cartype = json.loads(response.text)
-            print(cartype)
+            resp = json.loads(response.text)
         except json.JSONDecodeError as e:
             self.logger.error("[Autohome] JSON decode error: %s", e)
             return
 
-        self.logger.info(
-            "[Autohome] entry response parsed | status=%d length=%d",
-            response.status, len(response.text),
-        )
+        if resp.get("message") == "success":
+            self.logger.info("[Autohome] entry response success")
+            for res in resp["result"]:
+                for branditem in res["branditems"]:
+                    # TODO: 后续完善数据解析逻辑
+                    pass
+        else:
+            message = resp.get("message", "unknown error")
+            self.logger.error("[Autohome] entry response failed | message=%s", message)
+            self.crawler.engine.close_spider(self, reason=f"entry request failed: {message}")
