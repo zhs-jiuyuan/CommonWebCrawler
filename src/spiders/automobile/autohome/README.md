@@ -1,6 +1,6 @@
 # AutohomeWebCrawler
 
-汽车之家品牌信息爬虫，基于 Scrapy，采集汽车品牌/车系列表数据，存入 PostgreSQL。
+Autohome brand info crawler, based on Scrapy, collects car brand/series listing data into PostgreSQL.
 
 ## 快速开始
 
