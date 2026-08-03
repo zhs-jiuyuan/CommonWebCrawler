@@ -79,6 +79,16 @@ class AutohomeSpider(BaseSpider):
             self.logger.info("[Autohome] entry response success")
             for res in resp["result"]:
                 for branditem in res["branditems"]:
+                    brand_name = branditem["name"]
+                    brand_id = branditem["id"]
+                    brand_logo = branditem["logo"]
+                    for producer in branditem["fctitems"]:
+                        producer_id = producer["id"]
+                        producer_name = producer["name"]
+                        for item in producer["seriesitems"]:
+                            model_name = item["name"]
+                            model_id = item["id"]
+                            
                     # TODO: 后续完善数据解析逻辑
                     pass
         else:
