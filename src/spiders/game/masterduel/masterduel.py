@@ -30,7 +30,11 @@ class MasterduelSpider(BaseSpider):
 
     async def start(self):
         # TODO: 入口请求，数据源待定
-        pass
+        # `yield from ()` 在 async 函数中是 SyntaxError；`if False: yield`
+        # 使 start 成为空 async generator（Scrapy 引擎对 start() 做 async
+        # for，普通 coroutine 会抛 TypeError）
+        if False:
+            yield
 
     def parse(self, response):
         # TODO: 解析卡牌数据，数据源待定
