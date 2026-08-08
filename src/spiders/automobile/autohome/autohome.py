@@ -77,6 +77,9 @@ class AutohomeSpider(BaseSpider):
 
         if resp.get("message") == "success":
             self.logger.info("[Autohome] entry response success")
+            # [TEMP-DEBUG-START] 临时实验：只 yield 一个请求，程序写好后删除此块
+            sent = False
+            # [TEMP-DEBUG-END]
             for res in resp["result"]:
                 for branditem in res["branditems"]:
                     brand_name = branditem["name"]
@@ -119,6 +122,16 @@ class AutohomeSpider(BaseSpider):
                                 meta={"basic_info": basic_info},
                                 dont_filter=True,
                             )
+                            # [TEMP-DEBUG-START] 临时实验：只 yield 一个请求，程序写好后删除此块
+                            sent = True
+                            break
+                        if sent:
+                            break
+                    if sent:
+                        break
+                if sent:
+                    break
+            # [TEMP-DEBUG-END]
         else:
             message = resp.get("message", "unknown error")
             self.logger.error("[Autohome] entry response failed | message=%s", message)
@@ -128,11 +141,20 @@ class AutohomeSpider(BaseSpider):
         self.logger.info("[Autohome] param conf response status=%d", response.status)
         basic_info = response.meta["basic_info"]
         try:
-            resp = json.loads(response.text)
+            configuration = json.loads(response.text)
         except json.JSONDecodeError as e:
             self.logger.error("[Autohome] param conf JSON decode error: %s", e)
             return
+        if configuration.get("message") != "success":
+            self.logger.error(
+                "[Autohome] param conf failed | model_id=%s message=%s",
+                basic_info["model_id"], configuration.get("message"),
+            )
+            return
+        # [TEMP-DEBUG-START] 临时打印调试，程序写好后删除此行
+        print(configuration)
+        # [TEMP-DEBUG-END]
         self.logger.info(
             "[Autohome] param conf received | model_id=%s model_name=%s message=%s",
-            basic_info["model_id"], basic_info["model_name"], resp.get("message"),
+            basic_info["model_id"], basic_info["model_name"], configuration.get("message"),
         )
