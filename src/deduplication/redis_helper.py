@@ -73,3 +73,8 @@ class RedisDedupHelper:
     def keyword_has_full_record(self, keyword: str) -> bool:
         full_key = f"{self._prefix}:kw:{keyword}"
         return bool(self._r.exists(full_key))
+
+    def clear(self) -> None:
+        """Delete every key owned by this spider (fresh start for re-crawling)."""
+        for key in self._r.scan_iter(match=f"{self._prefix}:*"):
+            self._r.delete(key)
