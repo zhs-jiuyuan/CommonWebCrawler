@@ -197,3 +197,64 @@ class AutohomeSpider(BaseSpider):
             "[Autohome] pic class info received | model_id=%s classcount=%d speccount=%d",
             model_id, len(model_classinfo.get("classinfo", [])), len(model_classinfo.get("specitems", [])),
         )
+        pic_base_url = "https://car.app.autohome.com.cn/carbase/pic/getPicList"
+        pagesize = 8
+        for category in model_classinfo.get("classinfo", []):
+            category_id = category["id"]
+            category_name = category["name"]
+            isinner = 1 if category_id == 10 else 0
+            pagecount = (category["piccount"] + pagesize - 1) // pagesize
+            for pageindex in range(1, pagecount + 1):
+                pic_url = (
+                    f"{pic_base_url}?pluginversion=11.65.1&pm=1&seriesid={model_id}"
+                    f"&categoryid={category_id}&isinner={isinner}&pagesize={pagesize}&pageindex={pageindex}"
+                )
+                pic_headers = self._build_headers(
+                    api=pic_url, method="GET",
+                    ref="https://www.autohome.com.cn/",
+                )
+                pic_headers["accept"] = "application/json"
+                self.logger.info(
+                    "[Autohome] request pic list | model_id=%s category_id=%s category_name=%s pageindex=%d/%d",
+                    model_id, category_id, category_name, pageindex, pagecount,
+                )
+                yield scrapy.Request(
+                    url=pic_url,
+                    method="GET",
+                    headers=pic_headers,
+                    callback=self.parse_pic_list,
+                    meta={
+                        "model_id": model_id,
+                        "category_id": category_id,
+                        "category_name": category_name,
+                        "pageindex": pageindex,
+                    },
+                    dont_filter=True,
+                )
+
+    def parse_pic_list(self, response):
+        self.logger.info("[Autohome] pic list response status=%d", response.status)
+        model_id = response.meta["model_id"]
+        category_id = response.meta["category_id"]
+        category_name = response.meta["category_name"]
+        pageindex = response.meta["pageindex"]
+        try:
+            pic_list = json.loads(response.text)
+        except json.JSONDecodeError as e:
+            self.logger.error("[Autohome] pic list JSON decode error: %s", e)
+            return
+        if pic_list.get("returncode") != 0:
+            self.logger.error(
+                "[Autohome] pic list failed | model_id=%s category_id=%s returncode=%s",
+                model_id, category_id, pic_list.get("returncode"),
+            )
+            return
+        # [TEMP-DEBUG-START] 临时打印调试，程序写好后删除此行
+        print(pic_list)
+        # [TEMP-DEBUG-END]
+        result = pic_list.get("result", {})
+        self.logger.info(
+            "[Autohome] pic list received | model_id=%s category_id=%s category_name=%s pageindex=%s/%s rowcount=%s piccount=%d",
+            model_id, category_id, category_name,
+            pageindex, result.get("pagecount"), result.get("rowcount"), len(result.get("piclist", [])),
+        )
